@@ -1,0 +1,11 @@
+external_id,customer_name,item_name,price,quantity
+EXT-001,Alice Smith,Widget A,0.1,3
+EXT-002,Bob Jones,Gadget B,0.2,2
+EXT-003,Carol White,Doohickey C,0.7,1
+EXT-004,Dave Brown,Thingamajig D,9.99,5
+EXT-005,Eve Davis,Whatchamacallit E,14.50,2
+EXT-006,Frank Miller,Gizmo F,3.25,10
+EXT-007,Grace Wilson,Contraption G,0.10,7
+EXT-008,Hank Moore,Apparatus H,19.99,1
+EXT-009,Ida Taylor,Mechanism I,0.20,5
+EXT-010,Jack Anderson,Device J,7.77,3

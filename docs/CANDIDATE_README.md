@@ -1,0 +1,131 @@
+# Order Processing — Lead SDET Assignment
+
+Welcome, and thank you for taking the time to work on this assignment. We have designed it to mirror a real slice of quality engineering work at RapidCanvas. There are no trick questions — we want to see how you think, how you prioritise, and how you use your tools.
+
+---
+
+## Context
+
+You are joining the quality engineering function at RapidCanvas, where engineering teams deploy React DataApps and FastAPI services to production on our platform. Your job is to help teams ship with confidence. This assignment mirrors a real slice of that work.
+
+RapidCanvas builds solutions for many different customers. Each solution can look very different — some are UI-heavy DataApps, some are pure API services, some involve LLM pipelines that need evaluation frameworks, some require performance and concurrency harnesses, and many require a combination of all of these. A key part of the Lead SDET role is designing test infrastructure that is not purpose-built for one app, but is extensible enough to onboard new customer solutions without starting from scratch each time.
+
+**Keep this in mind throughout the assignment.** The Order Processing app is your test subject, but the infrastructure you build around it — your test framework, fixtures, reporting, and CI gates — should be designed as if the next engineer will point it at a completely different customer solution tomorrow. Your strategy document should explicitly address how your design accommodates that.
+
+---
+
+## The System
+
+The app you will be working with is an **Order Processing** service: a React frontend that lets users create, view, filter, and bulk-upload orders, backed by a FastAPI service that persists data to Postgres.
+
+```
+React DataApp → FastAPI Backend → Postgres
+```
+
+The app has non-trivial issues across all layers. Finding, characterising, and demonstrating those issues is central to Part 1.
+
+---
+
+## Getting Started
+
+```bash
+git clone <your-private-fork>
+cd Assignment
+docker-compose -f infra/docker-compose.yml up --build
+# App:  http://localhost:3000
+# API:  http://localhost:8000/docs
+# Seed data is applied automatically on first run
+```
+
+**Credentials:**
+| Email | Password | Role |
+|---|---|---|
+| admin@example.com | password123 | admin |
+| editor@example.com | password123 | editor |
+| viewer@example.com | password123 | viewer |
+
+---
+
+## Part 1 — Quality Engineering (Primary Deliverable)
+
+This is the main event. We expect 80% of your time here.
+
+### 1. Test Strategy Document (1–2 pages)
+
+Write this first. Cover: what you will test and at what layer, what is explicitly out of scope, and a risk-based prioritisation of the issues you have found. This is the first thing reviewers read, and a strong strategy doc can carry a submission even when the test suite is incomplete.
+
+Critically, your strategy doc must address **scalability of the test infrastructure itself**: how would your framework extend to a solution that has no UI (API-only), or one that is entirely an LLM pipeline requiring eval harnesses, or one that needs a performance/concurrency suite? You do not need to build all of these — but your design decisions should make it clear you have thought about them. A framework that only works for this one app is not at bar.
+
+### 2. Tests
+
+Write tests that give you confidence in the system. There are no constraints on tooling, layer, or format — use whatever combination of UI tests, API tests, unit tests, or integration tests you think best covers the risk surface you identified in your strategy doc.
+
+What we care about: do your tests actually catch the bugs you found? Would they catch a regression if someone "fixed" the bug incorrectly? The choice of what to test, at what layer, and with which tools is itself part of the signal.
+
+### 3. Bug Discovery Report (Markdown)
+
+Document every issue you find: severity, steps to reproduce, evidence (logs, screenshots, test output), suspected root cause, and recommended fix. We score depth and reasoning, not count. A well-analysed bug beats five bullet points.
+
+### 4. Logging Gap-Fill
+
+Identify where structured logging is missing or insufficient and add it. Explain your choices. Don't add a log statement to every line — add logs where they materially improve debuggability.
+
+### 5. CI Pipeline (GitHub Actions)
+
+Wire up `.github/workflows/` to run your pyramid on every PR. The pipeline should:
+- Fail on coverage regression.
+- Include basic flake detection (re-run + flag).
+- Publish test artifacts (reports, screenshots, traces).
+
+Include a one-paragraph written **definition of done** for any feature shipping on this system.
+
+---
+
+## Part 2 — Test Insights Dashboard
+
+See `dashboard/README.md` for the full brief.
+
+This part is intentionally open-ended. Your architecture and scoping decisions are the signal. Time-box it — a working, focused dashboard beats an impressive incomplete one.
+
+**Acceptance demo:** Run your Part 1 suite (including a deliberately failing E2E), then open your dashboard and walk us through how you would triage on a Monday morning.
+
+---
+
+## AI Usage
+
+You are encouraged to use any AI tooling. We evaluate what you effectively built and the judgment you applied — not raw effort or line count.
+
+**Required deliverable: AI Decision Journal** (markdown, ~2 pages):
+- The 5–10 most consequential prompts you used and why.
+- Where AI was wrong or misleading and how you caught it.
+- What you deliberately did not delegate to AI and why.
+- One example of an AI suggestion you overrode, with your reasoning.
+
+---
+
+## Submission
+
+1. Work in your private fork.
+2. Open a PR when done (Day 5 target).
+3. Record a 15–20 minute async walkthrough video covering: your bug report, your test strategy, how to run the CI pipeline, and the dashboard Monday-morning triage demo.
+4. A 90-minute live review will follow: 60 min deep-dive on your PR, 30 min live AI orchestration task we will give you fresh on the day.
+
+---
+
+## Time Expectation
+
+We expect **15–20 hours self-paced over 3–5 calendar days**. If you are significantly over this, you are probably going too deep on something that can be noted as "would do next" in your strategy doc. Judgment about what to defer is itself part of the signal.
+
+---
+
+## Rubric
+
+| Dimension | Weight |
+|---|---|
+| Decision-making and prioritisation (strategy doc, what was deferred and why) | 20% |
+| Bug discovery quality (depth, repro, severity reasoning) | 20% |
+| Test architecture (pyramid balance, contracts, fixtures, isolation) | 20% |
+| Test insights dashboard (product judgment, scope decisions, would an engineer use it?) | 15% |
+| CI/CD quality gates (meaningful gates, not theater) | 10% |
+| Logging gap-fill (where, why, what changed) | 5% |
+| AI orchestration and judgment (Decision Journal + live session) | 10% |
