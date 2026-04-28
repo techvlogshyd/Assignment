@@ -1,20 +1,82 @@
-# Part 2 — Test Insights Dashboard
+# Part 2 — Test insights dashboard (implementation)
 
-This directory is yours to build in.
+## What it does
 
-Your task is to build a working internal dashboard that an engineer would open on Monday morning to understand the health of the test suite.
+A small FastAPI app (`main.py`) that ingests test artifacts produced by Part 1 and answers, on a single page, the three questions the brief asks:
 
-**Hard constraints:**
-- Real working app (not a static report).
-- Ingests results from your Part 1 test runs (Playwright JSON/traces/videos, pytest JUnit/JSON).
-- Vendor-neutral OSS only. No SaaS test-reporting services.
-- Must come up with a single `docker-compose up` (or one documented command) on a fresh machine.
+1. **What is failing right now?** — top-of-page summary cards plus per-failure cards split into pytest and Playwright.
+2. **Is it newly failing or chronically flaky?** — a "newly failing" panel (failed in latest run, not in the previous), and a "flaky" table (mixed pass/fail across the last *N* runs, default 10).
+3. **Trends over the last N runs?** — a coloured sparkline (one tile per run, green ≥ 95% pass, amber ≥ 70%, red below) plus run-level rows in `/api/runs`.
 
-**Everything else is your call.** Tech stack, schema, which charts and filters to build first, whether to add auth or multi-project support — you decide and defend your decisions in the walkthrough video.
+For Playwright failures, the failure card embeds `<video>` and `<img>` attachments inline (whatever Playwright recorded under `attachments` — videos, screenshots, traces). The viewer never has to leave the dashboard to triage a red E2E.
 
-A great dashboard makes it easy to answer:
-- What is failing right now, and is it newly failing or chronically flaky?
-- How are pass rate, flake rate, and duration trending over the last N runs?
-- For an E2E failure, can I watch the step video and see the screenshot without leaving the dashboard?
+Vendor-neutral OSS only; no external SaaS reporters.
 
-We score judgment over breadth. A focused dashboard that nails 2-3 of the above is better than a sprawling one that does many things poorly.
+## Architecture
+
+```
+   pytest --junitxml -> test-results/junit-*.xml
+   Playwright JSON   -> test-results/playwright-report.json
+   Playwright media  -> test-results/playwright-output/...
+                        |
+                        v
+                +---------------------------+
+                |  POST /api/ingest         |
+                |  (auto-runs on startup)   |
+                +-------------+-------------+
+                              |
+                              v
+                  test-results/dashboard.sqlite
+                  (runs, outcomes; deduped by content hash)
+                              |
+                              v
+                +---------------------------+
+                |  /             HTML page  |
+                |  /api/summary  JSON       |
+                |  /api/runs     JSON       |
+                |  /artifacts/   videos +   |
+                |                screenshots|
+                +---------------------------+
+```
+
+The SQLite database lives on a writable Docker volume (`dashboard_data`) so history persists across container restarts. The artifacts directory is mounted read-only.
+
+## How to run
+
+```bash
+# Produce artifacts via the test suite, then:
+docker compose -f infra/docker-compose.yml up dashboard
+```
+
+Open http://localhost:4000.
+
+To force a re-ingest (e.g. after a fresh CI artifact download):
+
+```bash
+curl -X POST http://localhost:4000/api/ingest
+```
+
+To wipe history and start over:
+
+```bash
+curl -X DELETE http://localhost:4000/api/runs
+```
+
+## Configuration
+
+| Env var | Default | Notes |
+|---------|---------|-------|
+| `ARTIFACTS_ROOT` | `../test-results` (in dev) / `/data/test-results` (in compose) | Where to scan for `junit*.xml` and `playwright-report.json` |
+| `DASHBOARD_DB` | `<ARTIFACTS_ROOT>/dashboard.sqlite` (dev) / `/data/db/dashboard.sqlite` (compose) | SQLite history file |
+| `FLAKE_WINDOW` | `10` | Look-back window for flake detection |
+| `TREND_WINDOW` | `20` | Number of runs in the sparkline |
+
+## Scope decisions
+
+- **SQLite, not Postgres.** A single dashboard instance is enough; no migrations, no external service, ships in the same `docker compose` invocation as the rest of the stack.
+- **Server-rendered HTML, not a SPA.** The brief is explicit that scoping is the signal. Charts (Chart.js / Plotly) and a multi-page React UI would have looked impressive but added bundling and routing complexity for no rubric value. The sparkline is plain coloured `<span>`s; it works in any browser.
+- **Vendor-neutral by construction.** JUnit XML and Playwright JSON are the only inputs. Any test runner that writes JUnit XML can feed the dashboard tomorrow with zero code changes — that's the extensibility argument from `TEST_STRATEGY.md` made concrete.
+
+## CI integration
+
+The `insights-snapshot` job in `.github/workflows/ci.yml` downloads the backend and Playwright artifacts at the end of each run, ingests them into a fresh `dashboard.sqlite`, and uploads the SQLite file as a workflow artifact. That proves the pipeline end-to-end without standing up a long-running dashboard service.

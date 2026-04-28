@@ -1,0 +1,3 @@
+# Definition of done (Order Processing stack)
+
+A feature is done when it ships with automated tests at the appropriate layer (unit for pure logic, API contract tests for behaviour owned by the backend, UI or end-to-end checks for critical user journeys), structured logs sufficient to debug production incidents without reproducing locally, no new linter or type errors, and a green pull-request pipeline including coverage at or above the repository baseline. For user-visible behaviour, the change must include or update a concise test-strategy note when risk or scope is non-obvious, and known defects must be tracked with severity and reproduction steps rather than silently deferred.

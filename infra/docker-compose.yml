@@ -41,5 +41,21 @@ services:
     depends_on:
       - backend
 
+  dashboard:
+    build:
+      # Build from the repo root so the image can include qe_toolkit/.
+      context: ..
+      dockerfile: dashboard/Dockerfile
+    environment:
+      ARTIFACTS_ROOT: /data/test-results
+      DASHBOARD_DB: /data/db/dashboard.sqlite
+      DASHBOARD_PROJECT: order-processing
+    ports:
+      - "4000:8000"
+    volumes:
+      - ../test-results:/data/test-results:ro
+      - dashboard_data:/data/db
+
 volumes:
   postgres_data:
+  dashboard_data:

@@ -1,0 +1,11 @@
+{
+  "name": "order-processing-e2e",
+  "private": true,
+  "scripts": {
+    "test": "playwright test --grep-invert @demo-intentional-fail",
+    "test:all": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.44.1"
+  }
+}

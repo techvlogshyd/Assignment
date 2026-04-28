@@ -129,3 +129,34 @@ We expect **15–20 hours self-paced over 3–5 calendar days**. If you are sign
 | CI/CD quality gates (meaningful gates, not theater) | 10% |
 | Logging gap-fill (where, why, what changed) | 5% |
 | AI orchestration and judgment (Decision Journal + live session) | 10% |
+
+---
+
+## Automated testing & insights dashboard (submission addendum)
+
+Deliverables for reviewers:
+
+- `TEST_STRATEGY.md` — strategy, prioritisation, extensibility argument
+- `BUG_REPORT.md` — every bug with severity, repro, evidence, root cause, fix
+- `evidence/` — concrete reproduction transcripts (curl, pytest output, source diffs) for the highest-severity bugs
+- `qe_toolkit/` — shared QE framework (pytest fixtures, JUnit/Playwright parsers, coverage gate) reused by the backend conftest, CI scripts, and dashboard
+- `docs/ONBOARDING_NEW_CUSTOMER.md` — step-by-step recipe for pointing this framework at a different customer solution
+- `AI_DECISION_JOURNAL.md` — prompts, mistakes, non-delegations, three override examples
+- `docs/DEFINITION_OF_DONE.md` — one-paragraph shipping bar for the system
+
+| Step | Command |
+|------|---------|
+| Run the product | `docker compose -f infra/docker-compose.yml up --build` — app http://localhost:3000, API http://localhost:8000/docs |
+| Backend integration tests | Export `PYTEST_DATABASE_URL` (see `.github/workflows/ci.yml` for the CI shape), then `cd app/backend && pip install -r requirements.txt && python -m pytest tests/ --junitxml=../../test-results/junit-backend.xml --cov=app --cov-report=xml:../../test-results/coverage.xml` |
+| Frontend unit tests | `cd app/frontend && npm ci && npm test` |
+| Playwright | With the stack up: `cd e2e && npm ci && npx playwright install chromium && npm run test` (CI excludes the intentional red case; `npm run test:all` includes it for the Monday triage demo) |
+| Test insights UI | After artifacts exist under `test-results/`, run `docker compose -f infra/docker-compose.yml up dashboard` and open http://localhost:4000 |
+| Force a fresh ingest | `curl -X POST http://localhost:4000/api/ingest` |
+| Full scripted run | `./scripts/run-full-suite.sh` (requires `PYTEST_DATABASE_URL` and Docker for Playwright's browser binaries) |
+
+Continuous integration (`.github/workflows/ci.yml`):
+
+- Postgres service container, backend pytest with `--cov-fail-under=48` plus `coverage_baseline.txt` regression check
+- Lightweight flake harness via `pytest-rerunfailures`, surfaced as GitHub Actions `::warning::` annotations by `scripts/flag_flakes_from_junit.py`
+- Vitest and Playwright (Playwright runs against the real `docker compose` stack and excludes the intentional red case)
+- All test artifacts uploaded; an `insights-snapshot` job ingests them into a `dashboard.sqlite` and uploads it for download

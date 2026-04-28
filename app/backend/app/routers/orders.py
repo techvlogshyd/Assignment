@@ -212,8 +212,13 @@ async def upload_csv(
     if current_user.role not in (UserRole.admin, UserRole.editor):
         raise HTTPException(status_code=403, detail="insufficient permissions")
 
-    # NOTE: no structlog calls in this handler (logging gap — intentional)
     contents = await file.read()
+    logger.info(
+        "csv_upload_started",
+        filename=file.filename,
+        size_bytes=len(contents),
+        user_id=str(current_user.id),
+    )
     reader = csv.DictReader(io.StringIO(contents.decode("utf-8")))
 
     created = 0
@@ -235,4 +240,9 @@ async def upload_csv(
         created += 1
 
     await db.commit()
+    logger.info(
+        "csv_upload_completed",
+        rows_created=created,
+        user_id=str(current_user.id),
+    )
     return {"created": created}

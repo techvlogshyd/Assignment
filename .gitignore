@@ -1,6 +1,10 @@
 # Python
 __pycache__/
 *.pyc
+.coverage
+*.coverage
+coverage.xml
+htmlcov/
 *.pyo
 .env
 .venv/
@@ -16,5 +20,9 @@ dist/
 
 # OS
 .DS_Store
+
+# Test artifacts (keep directory via test-results/.gitkeep)
+test-results/*
+!test-results/.gitkeep
 
 docs/INTERVIEWER_GUIDE.md
