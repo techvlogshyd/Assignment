@@ -7,6 +7,7 @@ A small Python package extracted from this assignment so a second customer solut
 | `qe_toolkit.pytest_fixtures` | `app/backend/tests/conftest.py` | `postgres_url` session fixture (testcontainers + `PYTEST_DATABASE_URL` fallback), `run_alembic_migrations`, `patch_engine_to_nullpool`, `register_and_login` helper, honest-CI guardrail hook |
 | `qe_toolkit.junit` | `dashboard/main.py`, `scripts/flag_flakes_from_junit.py` | `parse_junit_files(root)` and `find_flakes(root)` — works on any JUnit XML |
 | `qe_toolkit.playwright` | `dashboard/main.py` | `parse_playwright_json(path, artifacts_root)` — Playwright JSON reporter parser with attachment URL rewriting |
+| `qe_toolkit.text` | `qe_toolkit.playwright`, `dashboard/main.py` | `strip_ansi` — removes terminal colour codes from Playwright error messages for HTML/JSON |
 | `qe_toolkit.coverage_gate` | `scripts/check_coverage_vs_baseline.py` | `line_coverage_percent`, `check_against_baseline` |
 
 ## Onboarding a new customer

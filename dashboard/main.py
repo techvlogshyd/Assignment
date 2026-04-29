@@ -20,6 +20,7 @@ import json
 import os
 import sqlite3
 import sys
+import uuid
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
@@ -34,6 +35,7 @@ from fastapi.staticfiles import StaticFiles
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from qe_toolkit.junit import parse_junit_files  # noqa: E402
 from qe_toolkit.playwright import parse_playwright_json  # noqa: E402
+from qe_toolkit.text import strip_ansi  # noqa: E402
 
 ARTIFACTS_ROOT = Path(os.environ.get("ARTIFACTS_ROOT", "../test-results")).resolve()
 ARTIFACTS_ROOT.mkdir(parents=True, exist_ok=True)
@@ -115,32 +117,62 @@ def _migrate_in_place(conn: sqlite3.Connection) -> None:
 # Ingest
 # ---------------------------------------------------------------------------
 
-def _content_hash(junit_summary, pw_summary) -> str:
+def _ingest_dedupe_key(root: Path) -> str:
+    """Key for deduping ingests: report file paths, mtimes, sizes, and raw bytes.
+
+    Outcome-only hashing made every run with the same pass/fail/skip layout look
+    like one run. Including file contents (and mtime) means a normal re-run that
+    rewrites JUnit / Playwright JSON produces a new dashboard row.
+    """
     h = hashlib.sha256()
-    h.update(json.dumps(junit_summary.totals, sort_keys=True).encode())
-    for c in junit_summary.cases:
-        h.update(f"{c.layer}|{c.suite}|{c.name}|{c.status}".encode())
-    if pw_summary:
-        h.update(json.dumps(pw_summary.stats, sort_keys=True).encode())
-        for c in pw_summary.cases:
-            h.update(f"{c['layer']}|{c['suite']}|{c['name']}|{c['status']}".encode())
+    paths = sorted(root.rglob("junit*.xml"))
+    pw = root / "playwright-report.json"
+    if pw.is_file():
+        paths = sorted([*paths, pw])
+    if not paths:
+        return hashlib.sha256(b"(no junit*.xml or playwright-report.json)").hexdigest()
+    for p in paths:
+        try:
+            rel = p.resolve().relative_to(root.resolve()).as_posix().encode()
+        except ValueError:
+            rel = p.name.encode()
+        try:
+            st = p.stat()
+            h.update(rel)
+            h.update(str(st.st_mtime_ns).encode())
+            h.update(str(st.st_size).encode())
+            h.update(p.read_bytes())
+        except OSError:
+            h.update(rel)
+            h.update(b"(unreadable)")
     return h.hexdigest()
 
 
-def ingest_current_artifacts(project: str = PROJECT) -> dict[str, Any]:
+def ingest_current_artifacts(project: str = PROJECT, *, force_duplicate: bool = False) -> dict[str, Any]:
     junit = parse_junit_files(ARTIFACTS_ROOT)
     pw_path = ARTIFACTS_ROOT / "playwright-report.json"
     pw = parse_playwright_json(pw_path, ARTIFACTS_ROOT)
-    chash = _content_hash(junit, pw)
+    chash = _ingest_dedupe_key(ARTIFACTS_ROOT)
+    # UNIQUE(project, content_hash): same report bytes + outcomes → skip.
+    # force_duplicate salts the key so two ingests of identical files still insert.
+    ingest_hash = (
+        hashlib.sha256(f"{chash}|{uuid.uuid4()}".encode()).hexdigest() if force_duplicate else chash
+    )
     duration = (pw.duration_ms if pw else 0.0)
 
     with db_connect() as conn:
-        existing = conn.execute(
-            "SELECT id FROM runs WHERE project = ? AND content_hash = ?",
-            (project, chash),
-        ).fetchone()
-        if existing:
-            return {"ingested": False, "reason": "identical content hash", "run_id": existing["id"], "project": project}
+        if not force_duplicate:
+            existing = conn.execute(
+                "SELECT id FROM runs WHERE project = ? AND content_hash = ?",
+                (project, ingest_hash),
+            ).fetchone()
+            if existing:
+                return {
+                    "ingested": False,
+                    "reason": "same ingest key as an existing run (report files and outcomes unchanged vs that run); POST /api/ingest?force_duplicate=true to append anyway",
+                    "run_id": existing["id"],
+                    "project": project,
+                }
 
         cur = conn.execute(
             """
@@ -154,7 +186,7 @@ def ingest_current_artifacts(project: str = PROJECT) -> dict[str, Any]:
             (
                 project,
                 datetime.now(timezone.utc).isoformat(),
-                chash,
+                ingest_hash,
                 junit.totals["tests"],
                 junit.totals["passed"],
                 junit.totals["failed"],
@@ -194,7 +226,13 @@ def ingest_current_artifacts(project: str = PROJECT) -> dict[str, Any]:
                 ),
             )
         conn.commit()
-    return {"ingested": True, "run_id": run_id, "project": project, "tests_recorded": len(cases)}
+    return {
+        "ingested": True,
+        "run_id": run_id,
+        "project": project,
+        "tests_recorded": len(cases),
+        "force_duplicate": force_duplicate,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +283,7 @@ def newly_failing(conn: sqlite3.Connection, project: str) -> list[dict[str, Any]
                     "suite": row["suite"],
                     "name": row["name"],
                     "status": row["status"],
-                    "message": row["message"],
+                    "message": strip_ansi(row["message"] or ""),
                     "attachments": json.loads(row["attachments"] or "[]"),
                 }
             )
@@ -283,6 +321,27 @@ def flaky_tests(conn: sqlite3.Connection, project: str, window: int = FLAKE_WIND
     ]
 
 
+def _pass_rate_excluding_skips(
+    junit_passed: int,
+    junit_failed: int,
+    junit_errors: int,
+    pw_passed: int,
+    pw_failed: int,
+) -> tuple[float | None, int, int]:
+    """Pass rate among tests that had a pass/fail outcome.
+
+    JUnit ``skipped`` (e.g. pytest xfail) and Playwright ``skipped`` are omitted
+    from the denominator so expected xfails do not paint the trend red while
+    the failure panels correctly show no *failed* cases.
+    """
+    passed = junit_passed + pw_passed
+    failed = junit_failed + junit_errors + pw_failed
+    evaluated = passed + failed
+    if evaluated == 0:
+        return None, passed, failed
+    return passed / evaluated, passed, failed
+
+
 def trend_series(conn: sqlite3.Connection, project: str, limit: int = TREND_WINDOW) -> list[dict[str, Any]]:
     rows = list(reversed(recent_runs(conn, project, limit)))
     out = []
@@ -290,8 +349,26 @@ def trend_series(conn: sqlite3.Connection, project: str, limit: int = TREND_WIND
         total = r["junit_total"] + r["pw_total"]
         passed = r["junit_passed"] + r["pw_passed"]
         failed = r["junit_failed"] + r["junit_errors"] + r["pw_failed"]
-        pass_rate = (passed / total) if total else 0.0
-        out.append({"id": r["id"], "ts": r["ts"], "total": total, "passed": passed, "failed": failed, "pass_rate": round(pass_rate, 4), "duration_ms": r["duration_ms"]})
+        rate, _, _ = _pass_rate_excluding_skips(
+            r["junit_passed"],
+            r["junit_failed"],
+            r["junit_errors"],
+            r["pw_passed"],
+            r["pw_failed"],
+        )
+        evaluated = passed + failed
+        out.append(
+            {
+                "id": r["id"],
+                "ts": r["ts"],
+                "total": total,
+                "evaluated": evaluated,
+                "passed": passed,
+                "failed": failed,
+                "pass_rate": None if rate is None else round(rate, 4),
+                "duration_ms": r["duration_ms"],
+            }
+        )
     return out
 
 
@@ -306,7 +383,13 @@ def latest_failures(conn: sqlite3.Connection, project: str) -> dict[str, list[di
     pytest_fail: list[dict[str, Any]] = []
     pw_fail: list[dict[str, Any]] = []
     for r in rows:
-        item = {"suite": r["suite"], "name": r["name"], "status": r["status"], "message": r["message"], "attachments": json.loads(r["attachments"] or "[]")}
+        item = {
+            "suite": r["suite"],
+            "name": r["name"],
+            "status": r["status"],
+            "message": strip_ansi(r["message"] or ""),
+            "attachments": json.loads(r["attachments"] or "[]"),
+        }
         (pytest_fail if r["layer"] == "pytest" else pw_fail).append(item)
     return {"pytest": pytest_fail, "playwright": pw_fail}
 
@@ -334,8 +417,13 @@ def startup() -> None:
 
 
 @app.post("/api/ingest")
-async def api_ingest(project: str | None = None) -> JSONResponse:
-    return JSONResponse(ingest_current_artifacts(project or PROJECT))
+async def api_ingest(
+    project: str | None = None,
+    force_duplicate: bool = False,
+) -> JSONResponse:
+    return JSONResponse(
+        ingest_current_artifacts(project or PROJECT, force_duplicate=force_duplicate)
+    )
 
 
 @app.get("/api/summary")
@@ -423,7 +511,7 @@ def _attachment_inline(att: dict[str, str]) -> str:
 def _failure_card_html(fail: dict[str, Any]) -> str:
     suite = escape(fail.get("suite") or "")
     name = escape(fail.get("name", ""))
-    msg = escape((fail.get("message") or "")[:1500])
+    msg = escape(strip_ansi((fail.get("message") or "")[:1500]))
     media = "".join(_attachment_inline(a) for a in fail.get("attachments") or [])
     return (
         f'<li><div class="suite">{suite}</div><div class="case"><code>{name}</code></div>'
@@ -446,12 +534,18 @@ def _trend_sparkline(points: list[dict[str, Any]]) -> str:
         return "(no runs yet)"
     cells = []
     for p in points:
-        if p["total"] == 0:
-            cells.append('<span class="spark-cell" style="background:#30363d" title="no tests"></span>')
+        evaluated = p.get("evaluated", p["passed"] + p["failed"])
+        if evaluated == 0:
+            title = f"run #{p['id']} — no pass/fail outcomes (all skipped or empty)"
+            cells.append(f'<span class="spark-cell" style="background:#30363d" title="{escape(title)}"></span>')
             continue
-        pct = p["pass_rate"]
-        color = "#3fb950" if pct >= 0.95 else ("#d29922" if pct >= 0.7 else "#f85149")
-        title = f"run #{p['id']} — {int(pct*100)}% pass ({p['passed']}/{p['total']})"
+        pr = p.get("pass_rate")
+        if pr is None:
+            title = f"run #{p['id']} — n/a"
+            cells.append(f'<span class="spark-cell" style="background:#30363d" title="{escape(title)}"></span>')
+            continue
+        color = "#3fb950" if pr >= 0.95 else ("#d29922" if pr >= 0.7 else "#f85149")
+        title = f"run #{p['id']} — {int(pr * 100)}% pass ({p['passed']}/{evaluated} evaluated; {p['total']} incl. skips)"
         cells.append(f'<span class="spark-cell" style="background:{color}" title="{escape(title)}"></span>')
     return f'<div class="spark">{"".join(cells)}</div>'
 
@@ -489,10 +583,15 @@ def _render_dashboard_html(*, project, all_projects, latest, trend, flaky, newly
     junit_failed = latest["junit_failed"] + latest["junit_errors"]
     pw_failed = latest["pw_failed"]
 
-    pass_rate = 0.0
+    pass_rate, _, _ = _pass_rate_excluding_skips(
+        latest["junit_passed"],
+        latest["junit_failed"],
+        latest["junit_errors"],
+        latest["pw_passed"],
+        latest["pw_failed"],
+    )
     total = junit_total + pw_total
-    if total:
-        pass_rate = (junit_passed + pw_passed) / total
+    evaluated = (junit_passed + pw_passed) + junit_failed + pw_failed
 
     flaky_count = len(flaky)
     nf_count = len(newly_fail)
@@ -524,7 +623,7 @@ def _render_dashboard_html(*, project, all_projects, latest, trend, flaky, newly
   <section>
     <h2>Latest run</h2>
     <div class="cards">
-      <div class="card"><div class="label">Pass rate</div><div class="num {'ok' if pass_rate >= 0.95 else ('warn' if pass_rate >= 0.7 else 'bad')}">{int(pass_rate*100)}%</div>{_bar(pass_rate)}</div>
+      <div class="card"><div class="label">Pass rate</div><div class="num {'ok' if pass_rate is not None and pass_rate >= 0.95 else ('warn' if pass_rate is not None and pass_rate >= 0.7 else ('bad' if pass_rate is not None else ''))}">{("—" if pass_rate is None else f"{int(pass_rate * 100)}%")}</div>{_bar(pass_rate if pass_rate is not None else 0.0)}<div class="meta">{evaluated} pass/fail · {total} incl. skips</div></div>
       <div class="card"><div class="label">Pytest passed</div><div class="num ok">{junit_passed}</div><div class="meta">of {junit_total}</div></div>
       <div class="card"><div class="label">Pytest failed</div><div class="num bad">{junit_failed}</div></div>
       <div class="card"><div class="label">Playwright passed</div><div class="num ok">{pw_passed}</div><div class="meta">of {pw_total}</div></div>
@@ -537,7 +636,7 @@ def _render_dashboard_html(*, project, all_projects, latest, trend, flaky, newly
   <section>
     <h2>Trend (last {TREND_WINDOW} runs)</h2>
     {spark}
-    <p class="meta">Each tile is one run. Green ≥ 95% pass, amber ≥ 70%, red below.</p>
+    <p class="meta">Each tile is one run. Rate is passed ÷ (passed + failed); skips (e.g. xfail) are excluded so they do not skew colour. Green ≥ 95%, amber ≥ 70%, red below. Grey = no pass/fail outcomes.</p>
   </section>
 
   <section>

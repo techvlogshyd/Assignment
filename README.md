@@ -151,8 +151,10 @@ Deliverables for reviewers:
 | Frontend unit tests | `cd app/frontend && npm ci && npm test` |
 | Playwright | With the stack up: `cd e2e && npm ci && npx playwright install chromium && npm run test` (CI excludes the intentional red case; `npm run test:all` includes it for the Monday triage demo) |
 | Test insights UI | After artifacts exist under `test-results/`, run `docker compose -f infra/docker-compose.yml up dashboard` and open http://localhost:4000 |
-| Force a fresh ingest | `curl -X POST http://localhost:4000/api/ingest` |
-| Full scripted run | `./scripts/run-full-suite.sh` (requires `PYTEST_DATABASE_URL` and Docker for Playwright's browser binaries) |
+| Ingest | `curl -X POST http://localhost:4000/api/ingest` (no-op if artifacts unchanged; use `?force_duplicate=true` to append a duplicate run for demos) |
+| Full scripted run | `./scripts/run-full-suite.sh` (Docker: testcontainers for pytest if `PYTEST_DATABASE_URL` unset; stack up for Playwright; Chromium install via script) |
+
+Step-by-step stack up/down and pre/post checks: `docs/EXECUTION_RUNBOOK.md`.
 
 Continuous integration (`.github/workflows/ci.yml`):
 

@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from qe_toolkit.text import strip_ansi
+
 
 @dataclass
 class PWSummary:
@@ -88,7 +90,7 @@ def parse_playwright_json(path: Path, artifacts_root: Path) -> PWSummary | None:
                         elif st in ("failed", "timedOut"):
                             out.stats["failed"] += 1
                             err = res.get("error") or {}
-                            msg = str(err.get("message", ""))[:1500]
+                            msg = strip_ansi(str(err.get("message", "")))[:1500]
                             out.failures.append({"title": full, "name": spec_title, "error": msg, "attachments": atts})
                             out.cases.append({"layer": "playwright", "suite": full, "name": spec_title, "status": "failed", "duration_ms": duration, "message": msg, "attachments": atts, "rerun_count": 0})
                         elif st == "skipped":

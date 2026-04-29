@@ -50,10 +50,18 @@ docker compose -f infra/docker-compose.yml up dashboard
 
 Open http://localhost:4000.
 
-To force a re-ingest (e.g. after a fresh CI artifact download):
+To ingest after new files land under `test-results/`:
 
 ```bash
 curl -X POST http://localhost:4000/api/ingest
+```
+
+Ingest dedupes using **JUnit / Playwright report paths, mtimes, sizes, and file bytes** — so a real re-run that rewrites those files should produce a **new** run. (Older versions keyed only on pass/fail counts and wrongly treated every green re-run as the same run.)
+
+If nothing on disk changed since the last ingest, the API returns `ingested: false`. To record **another run** with the same files (e.g. trend demos), use:
+
+```bash
+curl -X POST 'http://localhost:4000/api/ingest?force_duplicate=true'
 ```
 
 To wipe history and start over:
