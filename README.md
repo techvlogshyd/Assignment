@@ -83,7 +83,7 @@ Include a one-paragraph written **definition of done** for any feature shipping 
 
 ## Part 2 — Test Insights Dashboard
 
-See `dashboard/README.md` for the full brief.
+See `automation-framework/dashboard/README.md` for the full brief.
 
 This part is intentionally open-ended. Your architecture and scoping decisions are the signal. Time-box it — a working, focused dashboard beats an impressive incomplete one.
 
@@ -140,6 +140,7 @@ Deliverables for reviewers:
 - `BUG_REPORT.md` — every bug with severity, repro, evidence, root cause, fix
 - `evidence/` — concrete reproduction transcripts (curl, pytest output, source diffs) for the highest-severity bugs
 - `qe_toolkit/` — shared QE framework (pytest fixtures, JUnit/Playwright parsers, coverage gate) reused by the backend conftest, CI scripts, and dashboard
+- `automation-framework/dashboard/` — FastAPI test-insights UI (ingest + SQLite history)
 - `docs/ONBOARDING_NEW_CUSTOMER.md` — step-by-step recipe for pointing this framework at a different customer solution
 - `AI_DECISION_JOURNAL.md` — prompts, mistakes, non-delegations, three override examples
 - `docs/DEFINITION_OF_DONE.md` — one-paragraph shipping bar for the system
@@ -149,7 +150,7 @@ Deliverables for reviewers:
 | Run the product | `docker compose -f infra/docker-compose.yml up --build` — app http://localhost:3000, API http://localhost:8000/docs |
 | Backend integration tests | Export `PYTEST_DATABASE_URL` (see `.github/workflows/ci.yml` for the CI shape), then `cd app/backend && pip install -r requirements.txt && python -m pytest tests/ --junitxml=../../test-results/junit-backend.xml --cov=app --cov-report=xml:../../test-results/coverage.xml` |
 | Frontend unit tests | `cd app/frontend && npm ci && npm test` |
-| Playwright | With the stack up: `cd e2e && npm ci && npx playwright install chromium && npm run test` (CI excludes the intentional red case; `npm run test:all` includes it for the Monday triage demo) |
+| Playwright + automation | With the stack up: `cd automation-framework && pip install -r requirements.txt && playwright install chromium && python3 -m pytest -m "not demo_intentional_fail"` — defaults **`AUTOMATION_APP=order_processing`** (legacy **`E2E_CUSTOMER`** / **`INTEGRATION_APP`**); **`AUTOMATION_API_BASE_URL`** overrides API smoke targets; **`RUN_LLM_EVAL=1`** + **`requirements-llm.txt`** enables **`llm_eval`** tests; layer subsets **`python3 -m pytest -m ui`** / **`-m api`** / **`-m functional`** / **`-m llm_eval`**. CI excludes the intentional red marker; full **`python3 -m pytest`** includes it. Use **`python3 -m pytest`** if bare **`pytest`** is not on **`PATH`**. |
 | Test insights UI | After artifacts exist under `test-results/`, run `docker compose -f infra/docker-compose.yml up dashboard` and open http://localhost:4000 |
 | Ingest | `curl -X POST http://localhost:4000/api/ingest` (no-op if artifacts unchanged; use `?force_duplicate=true` to append a duplicate run for demos) |
 | Full scripted run | `./scripts/run-full-suite.sh` (Docker: testcontainers for pytest if `PYTEST_DATABASE_URL` unset; stack up for Playwright; Chromium install via script) |
@@ -160,5 +161,35 @@ Continuous integration (`.github/workflows/ci.yml`):
 
 - Postgres service container, backend pytest with `--cov-fail-under=48` plus `coverage_baseline.txt` regression check
 - Lightweight flake harness via `pytest-rerunfailures`, surfaced as GitHub Actions `::warning::` annotations by `scripts/flag_flakes_from_junit.py`
-- Vitest and Playwright (Playwright runs against the real `docker compose` stack and excludes the intentional red case)
+- Vitest and integration tests (**`automation-framework/`**: pytest-playwright + API + optional LLM; runs against `docker compose`, excludes the intentional red marker via `-m`)
 - All test artifacts uploaded; an `insights-snapshot` job ingests them into a `dashboard.sqlite` and uploads it for download
+
+
+## Structure
+
+- `app/backend/` — FastAPI service, SQLAlchemy models, Alembic migrations, backend tests
+- `app/frontend/` — React/Vite UI with Vitest unit tests
+- `automation-framework/` — reusable automation framework (UI/API/LLM layers) plus customer app bundles
+- `qe_toolkit/` — shared parsing and quality-gate utilities reused by CI, scripts, and dashboard
+- `infra/` — local stack orchestration (`docker-compose.yml`)
+- `test-results/` — generated artifacts (JUnit XML, Playwright JSON/media, coverage, dashboard SQLite snapshot)
+
+## Design docs
+
+- `TEST_STRATEGY.md` — risk-based strategy, layer ownership, and extensibility model
+- `docs/ONBOARDING_NEW_CUSTOMER.md` — playbook to point the framework at a different customer solution
+- `docs/EXECUTION_RUNBOOK.md` — operational run sequence (bring-up, verify, execute, teardown)
+- `docs/DEFINITION_OF_DONE.md` — release quality bar
+
+## AI analysis for dashboard
+
+- `AI_DECISION_JOURNAL.md` captures prompt strategy, mistakes corrected, and key override decisions for the dashboard scope and implementation.
+- `automation-framework/dashboard/README.md` explains architecture, ingestion model, and scoping choices for the test-insights UI.
+
+## Functional cases mapped to automation
+
+- Authentication/session flows: `automation-framework/apps/order_processing/tests/ui/test_login.py` and `automation-framework/apps/order_processing/tests/api/test_auth_session.py`
+- Orders happy-path UI/API coverage: `automation-framework/apps/order_processing/tests/ui/test_orders_smoke.py` and `automation-framework/apps/order_processing/tests/api/test_orders_api.py`
+- End-to-end/system confidence: `automation-framework/tests/integration/test_workflow_e2e.py` and `automation-framework/tests/integration/test_api_db_flow.py`
+- Production sanity/guardrails: `automation-framework/tests/production/test_release_health.py` and `automation-framework/tests/production/test_observability_sanity.py`
+- Dashboard triage anchor (intentional red test): `automation-framework/apps/order_processing/tests/ui/test_demo_intentional_fail.py`

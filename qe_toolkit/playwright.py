@@ -72,6 +72,8 @@ def parse_playwright_json(path: Path, artifacts_root: Path) -> PWSummary | None:
             )
         return result
 
+    latest_by_test: dict[tuple[str, str], dict[str, Any]] = {}
+
     def _walk(suites: list[Any], prefix: str = "") -> None:
         for suite in suites:
             title = suite.get("title", "")
@@ -79,24 +81,53 @@ def parse_playwright_json(path: Path, artifacts_root: Path) -> PWSummary | None:
             for spec in suite.get("specs", []):
                 spec_title = spec.get("title", "")
                 for test in spec.get("tests", []):
-                    for res in test.get("results", []):
-                        st = res.get("status", "")
-                        duration = float(res.get("duration", 0) or 0)
-                        out.duration_ms += duration
-                        atts = _atts_to_links(res.get("attachments") or [])
-                        if st == "passed":
-                            out.stats["passed"] += 1
-                            out.cases.append({"layer": "playwright", "suite": full, "name": spec_title, "status": "passed", "duration_ms": duration, "message": "", "attachments": atts, "rerun_count": 0})
-                        elif st in ("failed", "timedOut"):
-                            out.stats["failed"] += 1
-                            err = res.get("error") or {}
-                            msg = strip_ansi(str(err.get("message", "")))[:1500]
-                            out.failures.append({"title": full, "name": spec_title, "error": msg, "attachments": atts})
-                            out.cases.append({"layer": "playwright", "suite": full, "name": spec_title, "status": "failed", "duration_ms": duration, "message": msg, "attachments": atts, "rerun_count": 0})
-                        elif st == "skipped":
-                            out.stats["skipped"] += 1
-                            out.cases.append({"layer": "playwright", "suite": full, "name": spec_title, "status": "skipped", "duration_ms": duration, "message": "", "attachments": atts, "rerun_count": 0})
+                    results = test.get("results", []) or []
+                    for res in results:
+                        out.duration_ms += float(res.get("duration", 0) or 0)
+                    if not results:
+                        continue
+                    # Use final attempt for status accounting to avoid retry double counting.
+                    res = results[-1]
+                    st = res.get("status", "")
+                    duration = float(res.get("duration", 0) or 0)
+                    atts = _atts_to_links(res.get("attachments") or [])
+                    status = "skipped"
+                    msg = ""
+                    if st == "passed":
+                        status = "passed"
+                    elif st in ("failed", "timedOut"):
+                        status = "failed"
+                        err = res.get("error") or {}
+                        msg = strip_ansi(str(err.get("message", "")))[:1500]
+                    elif st == "skipped":
+                        status = "skipped"
+                    latest_by_test[(full, spec_title)] = {
+                        "layer": "playwright",
+                        "suite": full,
+                        "name": spec_title,
+                        "status": status,
+                        "duration_ms": duration,
+                        "message": msg,
+                        "attachments": atts,
+                        "rerun_count": 0,
+                    }
             _walk(suite.get("suites", []), full)
 
     _walk(data.get("suites", []))
+    for case in latest_by_test.values():
+        out.cases.append(case)
+        if case["status"] == "passed":
+            out.stats["passed"] += 1
+        elif case["status"] == "failed":
+            out.stats["failed"] += 1
+            out.failures.append(
+                {
+                    "title": case["suite"],
+                    "name": case["name"],
+                    "error": case["message"],
+                    "attachments": case["attachments"],
+                }
+            )
+        else:
+            out.stats["skipped"] += 1
     return out

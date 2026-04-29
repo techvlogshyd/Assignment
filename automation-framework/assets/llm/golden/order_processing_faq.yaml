@@ -1,0 +1,11 @@
+- case_id: faq-return-window
+  prompt: "What is the return window for orders?"
+  answer: "Orders can be returned within 30 days with original invoice."
+  expected_keywords: ["return", "30 days", "invoice"]
+  forbidden_claims: ["90 days", "no return policy"]
+  min_relevance: 0.7
+  min_completeness: 0.6
+  output_schema:
+    summary: string
+    policy_days: integer
+

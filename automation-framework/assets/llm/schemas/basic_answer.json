@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["summary", "policy_days"],
+  "properties": {
+    "summary": { "type": "string" },
+    "policy_days": { "type": "integer" }
+  },
+  "additionalProperties": false
+}
+

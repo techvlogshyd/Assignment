@@ -1,0 +1,7 @@
+- case_id: order_processing-summary
+  prompt: "Summarize return policy"
+  answer: "Returns accepted within 30 days"
+  expected_keywords: ["return", "30 days"]
+  forbidden_claims: ["90 days"]
+  min_relevance: 0.7
+  min_completeness: 0.5

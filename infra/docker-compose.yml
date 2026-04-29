@@ -45,7 +45,7 @@ services:
     build:
       # Build from the repo root so the image can include qe_toolkit/.
       context: ..
-      dockerfile: dashboard/Dockerfile
+      dockerfile: automation-framework/dashboard/Dockerfile
     environment:
       ARTIFACTS_ROOT: /data/test-results
       DASHBOARD_DB: /data/db/dashboard.sqlite

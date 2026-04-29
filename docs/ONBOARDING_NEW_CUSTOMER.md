@@ -91,7 +91,21 @@ Set `DASHBOARD_PROJECT=new-app` for the new dashboard ingest job. The dashboard 
 
 - **Customer-specific seeding fixtures.** `many_orders` lives in `app/backend/tests/conftest.py`; new-app would have its own seed helpers. The framework does not try to abstract domain models.
 - **Domain-specific contract tests.** The encoded-bug `xfail strict=True` and Vitest `it.fails` patterns are documented in `TEST_STRATEGY.md` but each customer writes their own.
-- **UI-test authoring conventions.** Playwright is the chosen tool, but page objects, selectors, and helper utilities belong in each customer's `e2e/` directory.
+- **UI-test authoring conventions.** Playwright is the chosen tool; page objects and helpers live under **`automation-framework/`** per customer app (`automation-framework/apps/<slug>/`).
+
+### 5. Automation harness (`automation-framework/engine/` + `automation-framework/apps/` + grouped tests)
+
+Order Processing ships a **multi-layer** layout — mirror under **`automation-framework/apps/<slug>/`** per application:
+
+1. **`automation-framework/engine/ui/`** — **`BasePage`**, **`CustomerAutomationProfile`** (SPA routes, headings, personas, **`api_base_url`**), **`register_customer`** / **`build_app_pages`** (`registry`).
+2. **`automation-framework/engine/api/`** — **`ApiSyncClient`** built from **`CustomerAutomationProfile.api_base_url`** (override host with **`AUTOMATION_API_BASE_URL`**).
+3. **`automation-framework/engine/llm/`** — optional DeepEval helpers (**`run_answer_relevancy_assert`**, **`RUN_LLM_EVAL`**, **`pip install -r requirements-llm.txt`**).
+4. **`automation-framework/engine/functional/`** — narrative docstring; orchestration tests live under **`automation-framework/tests/functional/`**.
+5. **`automation-framework/apps/order_processing/`** — **`config.py`**, **`pages/`** (POM), **`bundle.py`**, **`__init__.py`** registers **`register_customer("order-processing", …)`**.
+6. **`automation-framework/conftest.py`** imports each app package (`import apps.order_processing`). Fixtures: **`customer_config`**, **`pages`**, **`api_http_client`**, **`customer_slug`** (**`AUTOMATION_APP`**, legacy **`E2E_CUSTOMER`**).
+7. **Test grouping:** **`automation-framework/tests/ui`** (`pytest.mark.ui`), **`tests/api`**, **`tests/functional`**, **`tests/llm`**. Run subsets with **`python3 -m pytest -m ui`** / **`-m api`** / etc.
+
+Add **`automation-framework/apps/acme/`**, register **`register_customer("acme", …)`**, **`import apps.acme`** beside existing imports in **`automation-framework/conftest.py`**, then **`AUTOMATION_APP=acme`**.
 
 ## Acceptance criteria for a successful onboarding
 

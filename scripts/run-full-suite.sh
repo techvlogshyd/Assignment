@@ -26,8 +26,8 @@ cd "$ROOT/app/backend"
 cd "$ROOT/app/frontend"
 npm ci
 npm run test
-cd "$ROOT/e2e"
-npm ci
-npx playwright install chromium
-npm run test:all
+cd "$ROOT/automation-framework"
+pip install -r requirements.txt
+"$PY" -m playwright install chromium
+"$PY" -m pytest
 echo "Artifacts under $ROOT/test-results — start dashboard with: docker compose -f infra/docker-compose.yml up dashboard"

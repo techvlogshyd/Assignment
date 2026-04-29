@@ -109,9 +109,9 @@ docker compose -f infra/docker-compose.yml up --build -d dashboard
 | **Use the app** | Full stack up (§2) | Docker running; wait for health URLs. |
 | **Backend pytest (host)** | Optional: none if using testcontainers | Docker running for testcontainers; **or** set `PYTEST_DATABASE_URL`; `pip install -r app/backend/requirements.txt`; `mkdir -p test-results` if emitting XML. |
 | **Frontend Vitest (host)** | None | `cd app/frontend && npm ci` |
-| **Playwright** | **Full stack up (§2)** | `cd e2e && npm ci && npx playwright install chromium` (or `--with-deps chromium` on Linux CI); `PLAYWRIGHT_BASE_URL` defaults in config — use http://127.0.0.1:3000 if matching CI. |
+| **Integration suite** | **Full stack up (§2)** | `cd automation-framework && pip install -r requirements.txt && playwright install chromium` (or `python -m playwright install --with-deps chromium` on Linux CI); override URL with `PLAYWRIGHT_BASE_URL` — use http://127.0.0.1:3000 if matching CI. |
 | **Dashboard** | Dashboard service (§3) | `test-results/` populated (at least after one test run); optional `mkdir -p test-results` and keep `test-results/.gitkeep`. |
-| **Full script** `./scripts/run-full-suite.sh` | E2E needs stack for Playwright | Docker for testcontainers (or set `PYTEST_DATABASE_URL`); bring up **§2** before Playwright; script runs pytest → Vitest → `npm run test:all`. |
+| **Full script** `./scripts/run-full-suite.sh` | Integration suite needs stack | Docker for testcontainers (or set `PYTEST_DATABASE_URL`); bring up **§2** before UI/API tests; script runs pytest → Vitest → full integration suite (`python3 -m pytest`). |
 
 ---
 
@@ -178,30 +178,30 @@ cd ../..
 
 ---
 
-### 5.3 Playwright E2E
+### 5.3 Integration suite (`automation-framework/`)
 
-**Pre:** full stack **§2** healthy; install browsers once per machine under `e2e/`.
+**Pre:** full stack **§2** healthy; install browsers once per machine under `automation-framework/`.
 
 ```bash
-cd e2e
-npm ci
-npx playwright install chromium
+cd automation-framework
+pip install -r requirements.txt
+python -m playwright install chromium
 ```
 
 **CI-equivalent (green; excludes intentional red demo):**
 
 ```bash
 mkdir -p ../test-results
-PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 npm run test
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 python3 -m pytest -m "not demo_intentional_fail"
 ```
 
 **Full suite including Monday-demo failure:**
 
 ```bash
-PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 npm run test:all
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 python3 -m pytest
 ```
 
-**Post:** reports under `test-results/` (`playwright-report.json`, `playwright-html/`, `playwright-output/`, etc.).
+**Post:** reports under `test-results/` (`playwright-report.json`, `playwright-html/`, `playwright-output/`, etc.). Tests live under **`tests/ui`**, **`tests/api`**, **`tests/functional`**, **`tests/llm`** with pytest markers (**`ui`**, **`api`**, **`functional`**, **`llm_eval`**); run subsets with **`python3 -m pytest -m ui`** (browser-only), **`-m api`**, etc. **`AUTOMATION_API_BASE_URL`** overrides the REST base URL from the automation profile; **`RUN_LLM_EVAL=1`** plus **`pip install -r requirements-llm.txt`** enables **`llm_eval`** cases.
 
 ---
 
@@ -286,5 +286,5 @@ docker compose -f infra/docker-compose.yml down -v
 ## 9. GitHub Actions (no local stack)
 
 **Pre:** push or PR to `main`/`master`.  
-**Execution:** workflow in `.github/workflows/ci.yml` runs backend (with service Postgres), frontend unit, e2e (compose on runner), then `insights-snapshot`.  
+**Execution:** workflow in `.github/workflows/ci.yml` runs backend (with service Postgres), frontend unit, integration suite (`automation-framework/` job — compose on runner), then `insights-snapshot`.  
 **Post:** download artifacts (`backend-test-artifacts`, `playwright-artifacts`, `dashboard-snapshot`) from the Actions run if needed.

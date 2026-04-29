@@ -1,0 +1,44 @@
+default_environment: qa
+environments:
+  dev:
+    name: dev
+    ui_base_url: http://127.0.0.1:3000
+    api_base_url: http://127.0.0.1:8000
+    request_timeout_seconds: 20
+    verify_tls: false
+    log_level: DEBUG
+    llm_enabled: false
+  qa:
+    name: qa
+    ui_base_url: http://127.0.0.1:3000
+    api_base_url: http://127.0.0.1:8000
+    request_timeout_seconds: 30
+    verify_tls: true
+    log_level: INFO
+    llm_enabled: true
+    llm_model: gpt-4o-mini
+    llm_warning_threshold: 0.65
+    llm_fail_threshold: 0.50
+  stage:
+    name: stage
+    ui_base_url: https://stage.example.com
+    api_base_url: https://stage-api.example.com
+    request_timeout_seconds: 45
+    verify_tls: true
+    log_level: INFO
+    llm_enabled: true
+    llm_model: gpt-4o-mini
+  prod:
+    name: prod
+    ui_base_url: https://app.example.com
+    api_base_url: https://api.example.com
+    request_timeout_seconds: 60
+    verify_tls: true
+    log_level: WARNING
+    llm_enabled: true
+app_defaults:
+  order_processing:
+    supports_ui: true
+    supports_api: true
+    supports_llm: true
+

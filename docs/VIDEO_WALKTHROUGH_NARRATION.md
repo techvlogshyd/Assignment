@@ -10,7 +10,7 @@
 
 Hi, I am `[your name]`, and this is my async walkthrough for the Lead SDET assignment on the Order Processing application: a React frontend, a FastAPI backend, and Postgres. In the next few minutes I will walk through four things in order: what I found in the product and how I documented it; how I chose what to test and at which layer; how continuous integration runs that pyramid and enforces quality gates; and finally how I would use the test insights dashboard on a Monday morning to triage failures.
 
-The repo is organised so a reviewer can go straight to the artefacts: `TEST_STRATEGY.md` is the strategy; `BUG_REPORT.md` plus the `evidence/` folder is the bug narrative with concrete transcripts; `qe_toolkit/` is the shared framework; `.github/workflows/ci.yml` is the pipeline; and `dashboard/` is the insights UI. I will reference those paths as I go.
+The repo is organised so a reviewer can go straight to the artefacts: `TEST_STRATEGY.md` is the strategy; `BUG_REPORT.md` plus the `evidence/` folder is the bug narrative with concrete transcripts; `qe_toolkit/` is the shared framework; `.github/workflows/ci.yml` is the pipeline; and `automation-framework/dashboard/` is the insights UI. I will reference those paths as I go.
 
 **On screen.** Optional: show your fork on GitHub and the `main` branch, or your IDE with the repo root open.
 
@@ -74,13 +74,13 @@ After pytest, a dedicated step runs **`scripts/check_coverage_vs_baseline.py`**,
 
 The **frontend-unit** job checks out the repo, sets up Node 20 with npm cache, runs **`npm ci`** and **`npm test`** under `app/frontend`, which executes Vitest.
 
-The **e2e** job brings up the full stack with **`docker compose -f infra/docker-compose.yml up -d --build`**, then polls until the API health endpoint and the frontend root URL respond. It installs Playwright in the `e2e` package with **`npm ci`** and **`npx playwright install --with-deps chromium`**. The tests run with **`npm run test`**, which translates to Playwright with **`--grep-invert @demo-intentional-fail`**. So the **intentional red** demo spec is excluded from CI; the pipeline stays mergeable while the spec still exists for demos and local runs. Reports and media go under **`test-results/`**—JSON, HTML, traces, screenshots, video—and upload as the **playwright-artifacts** artifact.
+The **integration** job brings up the full stack with **`docker compose -f infra/docker-compose.yml up -d --build`**, then polls until the API health endpoint and the frontend root URL respond. It installs **`pytest-playwright`** under **`automation-framework/`** with **`pip install -r requirements.txt`** and **`playwright install --with-deps chromium`**. The tests run with **`python -m pytest -m "not demo_intentional_fail"`**, excluding the intentional red demo marker from CI. The pipeline stays mergeable while that test still exists for demos and local runs. Reports and media go under **`test-results/`**—JSON, HTML, traces, screenshots, video—and upload as the **playwright-artifacts** artifact.
 
-The **insights-snapshot** job depends on backend and e2e and uses **`if: always()`** so it still runs when an upstream job fails, which is useful for debugging. It downloads the backend and Playwright artifacts into `test-results`, installs dashboard requirements, and runs a small Python one-liner that imports `dashboard.main` and calls **`ingest_current_artifacts()`**, writing **`dashboard.sqlite`**. That file uploads as **dashboard-snapshot**, demonstrating that the same ingestion logic used locally can run headlessly in CI.
+The **insights-snapshot** job depends on backend and integration and uses **`if: always()`** so it still runs when an upstream job fails, which is useful for debugging. It downloads the backend and Playwright artifacts into `test-results`, installs dashboard requirements, and runs a small Python one-liner that imports `main` from `automation-framework/dashboard` and calls **`ingest_current_artifacts()`**, writing **`dashboard.sqlite`**. That file uploads as **dashboard-snapshot**, demonstrating that the same ingestion logic used locally can run headlessly in CI.
 
 For reviewers who want to reproduce locally, the **README** table lists the exact commands: compose for the product, pytest with the same env shape as CI, Vitest, Playwright, dashboard on port 4000, and optional **`./scripts/run-full-suite.sh`**.
 
-**On screen.** Walk through `ci.yml` in the editor; show `e2e/package.json` scripts; optionally show a green Actions run and the uploaded artifacts list.
+**On screen.** Walk through `ci.yml` in the editor; show `automation-framework/pytest.ini` markers; optionally show a green Actions run and the uploaded artifacts list.
 
 ---
 
@@ -92,7 +92,7 @@ Part two of the assignment is a test insights dashboard. Mine is a small FastAPI
 
 Imagine **Monday morning**. Overnight CI is green on the main branch, but you still want to rehearse triage—or you have a branch where one end-to-end test is red. You need to see the failure, decide if it is new, and avoid opening five different folders on disk.
 
-First, produce artefacts. For this video I am including the **intentional failing** Playwright test, so I run **`npm run test:all`** in `e2e`, not the CI-only **`npm run test`**. That writes a red result into `test-results` along with attachments. I also run backend pytest with JUnit and coverage output into the same `test-results` tree so the dashboard shows both layers—or I use **`./scripts/run-full-suite.sh`** if my environment already has a database URL and browsers installed.
+First, produce artefacts. For this video I am including the **intentional failing** Playwright test, so I run **`python3 -m pytest`** in **`automation-framework/`** (full suite), not the CI-only **`python3 -m pytest -m "not demo_intentional_fail"`**. That writes a red result into `test-results` along with attachments. I also run backend pytest with JUnit and coverage output into the same `test-results` tree so the dashboard shows both layers—or I use **`./scripts/run-full-suite.sh`** if my environment already has a database URL and browsers installed.
 
 Then I start the dashboard service with Docker Compose—for example **`docker compose -f infra/docker-compose.yml up dashboard`**—and open **http://localhost:4000**. On startup the app ingests what is on disk. If I rerun tests and need a refresh without restarting the container, I **`POST /api/ingest`**.
 
@@ -102,7 +102,7 @@ If my SQLite history is noisy from older experiments, I can **`DELETE /api/runs`
 
 I will close by tying back to **extensibility**: the dashboard does not know about Order Processing specifically; it knows about **JUnit and Playwright artefacts**. The parsers live in **`qe_toolkit`**, so the next engineer can point the same machinery at a different repository tomorrow.
 
-**On screen.** Terminal: compose, `npm run test:all`, dashboard up, `curl` ingest. Browser: scroll summary, failures with media, flaky and trend sections.
+**On screen.** Terminal: compose, `python3 -m pytest` in `automation-framework/`, dashboard up, `curl` ingest. Browser: scroll summary, failures with media, flaky and trend sections.
 
 ---
 
@@ -129,3 +129,30 @@ That completes the walkthrough: **bugs** with evidence and severities; **strateg
 | **Total**            | **~15–25 minutes**   |
 
 If you run long, shorten Section B by covering only B4, B1, B3, and the xfail story, and summarise the rest as “also documented in `BUG_REPORT.md`.”
+
+
+cd /Users/prasanna/GitHub/Assignment
+
+# 1. Stack up
+docker compose -f infra/docker-compose.yml up -d --build
+sleep 15 && curl -s http://localhost:8000/health   # confirm it's live
+
+# 2. Backend tests + coverage
+cd app/backend
+export PYTEST_DATABASE_URL=postgresql+asyncpg://orders_user:orders_pass@localhost:5432/orders_db
+python3 -m pytest tests/ \
+  --junitxml=../../test-results/junit-backend.xml \
+  --cov=app --cov-report=xml:../../test-results/coverage.xml -q
+
+# 3. Integration suite (full mode → has the deliberate red, generates traces)
+cd ../../integration
+pip install -r requirements.txt -q
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 python3 -m pytest || true
+
+# 4. Wipe + ingest into dashboard so it has both runs in history
+curl -s -X DELETE http://localhost:4000/api/runs
+curl -s -X POST http://localhost:4000/api/ingest
+
+# 5. Run integration tests again *without* the red, ingest again — gives the trend two tiles
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 python3 -m pytest -m "not demo_intentional_fail"
+curl -s -X POST http://localhost:4000/api/ingest

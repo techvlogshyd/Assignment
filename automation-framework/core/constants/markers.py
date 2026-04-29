@@ -1,0 +1,6 @@
+SMOKE = "smoke"
+SANITY = "sanity"
+REGRESSION = "regression"
+UI = "ui"
+API = "api"
+LLM = "llm_eval"
