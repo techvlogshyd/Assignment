@@ -141,8 +141,12 @@ def _migrate_in_place(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN project TEXT NOT NULL DEFAULT 'default'")
             conn.commit()
         except sqlite3.OperationalError:
-            # Column already exists.
             pass
+    try:
+        conn.execute("ALTER TABLE outcomes ADD COLUMN rerun_count INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -235,15 +239,24 @@ def ingest_current_artifacts(project: str = PROJECT, *, force_duplicate: bool = 
 
         cases: list[dict[str, Any]] = []
         for c in junit.cases:
-            cases.append({"layer": c.layer, "suite": c.suite, "name": c.name, "status": c.status, "duration_ms": c.duration_ms, "message": c.message, "attachments": []})
+            cases.append({
+                "layer": c.layer,
+                "suite": c.suite,
+                "name": c.name,
+                "status": c.status,
+                "duration_ms": c.duration_ms,
+                "message": c.message,
+                "attachments": [],
+                "rerun_count": c.rerun_count,
+            })
         if pw:
             cases.extend(pw.cases)
 
         for c in cases:
             conn.execute(
                 """
-                INSERT INTO outcomes (run_id, project, layer, suite, name, status, duration_ms, message, attachments)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO outcomes (run_id, project, layer, suite, name, status, duration_ms, message, attachments, rerun_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -255,6 +268,7 @@ def ingest_current_artifacts(project: str = PROJECT, *, force_duplicate: bool = 
                     c.get("duration_ms") or 0.0,
                     c.get("message") or "",
                     json.dumps(c.get("attachments") or []),
+                    int(c.get("rerun_count") or 0),
                 ),
             )
         conn.commit()
@@ -323,6 +337,20 @@ def newly_failing(conn: sqlite3.Connection, project: str) -> list[dict[str, Any]
 
 
 def flaky_tests(conn: sqlite3.Connection, project: str, window: int = FLAKE_WINDOW) -> list[dict[str, Any]]:
+    """Surface tests that are unreliable in the last ``window`` runs.
+
+    A test is flaky if any of these is true within the window:
+
+    1. **Mixed pass/fail** — it has at least one pass *and* at least one fail.
+    2. **Recovered after rerun** — it required pytest-rerunfailures retries
+       (``rerun_count > 0`` from the JUnit ``<rerun>`` element) in any run.
+    3. **Intermittent presence with failure** — it failed at least once but
+       did not appear in every run in the window. This is the canonical case
+       for selectively-deselected tests like the dashboard demo failure, and
+       for tests that are quarantined/skipped intermittently.
+
+    The ``reason`` field on each row tells the triager which signals fired.
+    """
     run_rows = list(
         conn.execute(
             "SELECT id FROM runs WHERE project = ? ORDER BY id DESC LIMIT ?",
@@ -332,25 +360,47 @@ def flaky_tests(conn: sqlite3.Connection, project: str, window: int = FLAKE_WIND
     if not run_rows:
         return []
     run_ids = [r["id"] for r in run_rows]
+    n_runs = len(run_ids)
     placeholders = ",".join("?" for _ in run_ids)
     cur = conn.execute(
         f"""
         SELECT layer, suite, name,
                SUM(CASE WHEN status = 'passed' THEN 1 ELSE 0 END) AS passes,
                SUM(CASE WHEN status IN ('failed','error') THEN 1 ELSE 0 END) AS fails,
+               SUM(COALESCE(rerun_count, 0)) AS reruns,
                COUNT(*) AS runs_with_outcome
         FROM outcomes
         WHERE run_id IN ({placeholders})
         GROUP BY layer, suite, name
-        HAVING passes > 0 AND fails > 0
-        ORDER BY fails DESC, passes DESC
+        HAVING (passes > 0 AND fails > 0)
+            OR reruns > 0
+            OR (fails > 0 AND runs_with_outcome < ?)
+        ORDER BY fails DESC, reruns DESC, passes DESC
         """,
-        run_ids,
+        (*run_ids, n_runs),
     )
-    return [
-        {"layer": r["layer"], "suite": r["suite"], "name": r["name"], "passes": r["passes"], "fails": r["fails"], "runs_with_outcome": r["runs_with_outcome"]}
-        for r in cur
-    ]
+    out: list[dict[str, Any]] = []
+    for r in cur:
+        reasons: list[str] = []
+        if r["passes"] > 0 and r["fails"] > 0:
+            reasons.append("mixed pass/fail")
+        if r["reruns"] > 0:
+            reasons.append(f"recovered after {r['reruns']} rerun(s)")
+        if r["fails"] > 0 and r["runs_with_outcome"] < n_runs:
+            reasons.append(f"intermittent ({r['runs_with_outcome']}/{n_runs} runs)")
+        out.append(
+            {
+                "layer": r["layer"],
+                "suite": r["suite"],
+                "name": r["name"],
+                "passes": r["passes"],
+                "fails": r["fails"],
+                "reruns": r["reruns"],
+                "runs_with_outcome": r["runs_with_outcome"],
+                "reason": "; ".join(reasons) or "—",
+            }
+        )
+    return out
 
 
 def _pass_rate_excluding_skips(
@@ -590,7 +640,9 @@ def _flaky_row(t: dict[str, Any]) -> str:
         f'<td><code>{escape(t["name"])}</code></td>'
         f'<td class="ok">{t["passes"]}</td>'
         f'<td class="bad">{t["fails"]}</td>'
-        f'<td>{t["runs_with_outcome"]}</td></tr>'
+        f'<td>{t.get("reruns", 0)}</td>'
+        f'<td>{t["runs_with_outcome"]}</td>'
+        f'<td>{escape(t.get("reason", ""))}</td></tr>'
     )
 
 
@@ -712,9 +764,10 @@ def _render_dashboard_html(*, project, all_projects, latest, trend, flaky, newly
   </section>
 
   <section>
-    <h2>Flaky tests (mixed pass/fail in last {FLAKE_WINDOW} runs)</h2>
+    <h2>Flaky tests in last {FLAKE_WINDOW} runs</h2>
+    <p class="meta">A test is flagged when any of: mixed pass/fail, recovered after a rerun, or it failed in some runs but did not appear in every run in the window.</p>
     <table class="flaky">
-      <thead><tr><th>Layer</th><th>Suite</th><th>Test</th><th>Passes</th><th>Fails</th><th>Runs</th></tr></thead>
+      <thead><tr><th>Layer</th><th>Suite</th><th>Test</th><th>Passes</th><th>Fails</th><th>Reruns</th><th>Runs</th><th>Why flagged</th></tr></thead>
       <tbody>{flaky_rows}</tbody>
     </table>
   </section>
