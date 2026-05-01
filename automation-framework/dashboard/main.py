@@ -43,9 +43,33 @@ _DEFAULT_ARTIFACTS = _REPO_ROOT / "test-results"
 ARTIFACTS_ROOT = Path(
     os.environ.get("ARTIFACTS_ROOT", str(_DEFAULT_ARTIFACTS))
 ).resolve()
-AI_REPORT_PATH = Path(
-    os.environ.get("AI_ANALYSIS_REPORT", str(_REPO_ROOT / "AI_DECISION_JOURNAL.md"))
-).resolve()
+def _resolve_ai_report_path() -> Path:
+    """Locate the decision journal across local-dev and container layouts.
+
+    - In local dev, the journal lives at <repo_root>/AI_DECISION_JOURNAL.md and
+      `_REPO_ROOT` resolves to the repo root from `parent.parent.parent`.
+    - In the Docker image, the Dockerfile copies the journal next to `main.py`
+      at /app/AI_DECISION_JOURNAL.md, so `_REPO_ROOT` (= /) does not contain it.
+
+    The explicit `AI_ANALYSIS_REPORT` env var always wins. Otherwise we pick
+    the first candidate that exists; if none exist we fall back to the local-dev
+    path so the "not found" message points at a sensible location.
+    """
+    override = os.environ.get("AI_ANALYSIS_REPORT")
+    if override:
+        return Path(override).resolve()
+
+    candidates = [
+        Path(__file__).resolve().parent / "AI_DECISION_JOURNAL.md",  # container layout
+        _REPO_ROOT / "AI_DECISION_JOURNAL.md",                        # local dev layout
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    return candidates[-1].resolve()
+
+
+AI_REPORT_PATH = _resolve_ai_report_path()
 ARTIFACTS_ROOT.mkdir(parents=True, exist_ok=True)
 DB_PATH = Path(os.environ.get("DASHBOARD_DB", str(ARTIFACTS_ROOT / "dashboard.sqlite"))).resolve()
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)

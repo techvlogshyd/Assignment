@@ -50,9 +50,13 @@ def postgres_url() -> str:
             "(start Docker, or export PYTEST_DATABASE_URL). "
             f"Underlying error: {exc!r}"
         )
-    url = postgres.get_connection_url().replace(
-        "postgresql://", "postgresql+asyncpg://", 1
-    )
+    raw_url = postgres.get_connection_url()
+    if raw_url.startswith("postgresql+psycopg2://"):
+        url = raw_url.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
+    elif raw_url.startswith("postgresql://"):
+        url = raw_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    else:
+        url = raw_url
     try:
         yield url
     finally:

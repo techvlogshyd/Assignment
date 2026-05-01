@@ -1,11 +1,12 @@
 # Python
 __pycache__/
 *.pyc
+*.pyo
+.pytest_cache/
 .coverage
 *.coverage
 coverage.xml
 htmlcov/
-*.pyo
 .env
 .venv/
 venv/

@@ -130,6 +130,20 @@ We expect **15–20 hours self-paced over 3–5 calendar days**. If you are sign
 | Logging gap-fill (where, why, what changed) | 5% |
 | AI orchestration and judgment (Decision Journal + live session) | 10% |
 
+### How this submission addresses each rubric dimension
+
+| Dimension | Where to look | One-line summary |
+| --- | --- | --- |
+| Decision-making (20%) | `TEST_STRATEGY.md` | Risk-based prioritisation, layer ownership, Deferrals section, extensibility argument with `qe_toolkit/`. |
+| Bug discovery (20%) | `BUG_REPORT.md` + `evidence/` | 14 issues with severity, **Actual vs Expected**, evidence, root cause, fix; top three (B4 / B1 / B3) have full curl + pytest transcripts. |
+| Test architecture (20%) | `qe_toolkit/`, `automation-framework/apps/order_processing/`, `app/backend/tests/`, `app/frontend/src/components/Pagination.test.tsx` | Pyramid: Vitest unit + 14 backend pytest + 8 Playwright/API/LLM. Reusable core lives in `qe_toolkit/`; new customer onboarding is a ~30-line conftest (`docs/ONBOARDING_NEW_CUSTOMER.md`). |
+| Dashboard (15%) | `automation-framework/dashboard/` ([overview screenshot](docs/screenshots/dashboard-overview-with-failures.png), [AI analysis screenshot](docs/screenshots/dashboard-ai-analysis.png)) | Single-page HTML + SQLite history. Answers the three Monday questions: what is failing, what is newly failing, what is flaky. Vendor-neutral JUnit + Playwright JSON ingest. |
+| CI/CD (10%) | `.github/workflows/ci.yml`, `scripts/check_coverage_vs_baseline.py`, `scripts/flag_flakes_from_junit.py` | 4 jobs. Real gates: `--cov-fail-under=48` + `coverage_baseline.txt` regression check + `--reruns 2` flake harness emitted as `::warning::` annotations + `insights-snapshot` ingest job. |
+| Logging gap-fill (5%) | `BUG_REPORT.md` § L1, L2 + `app/backend/app/middleware/logging.py` | `csv_upload_started` / `csv_upload_completed` events, plus authenticated `user_id` bound on `request.state` for every request log. |
+| AI orchestration (10%) | `AI_DECISION_JOURNAL.md` | Three overrides (discovery vs silent fixes, dashboard storage layer, extracting `qe_toolkit/`), three places AI was wrong, four non-delegations. |
+
+Walkthrough recording script: `docs/VIDEO_WALKTHROUGH_NARRATION.md`.
+
 ---
 
 ## Automated testing & insights dashboard (submission addendum)
@@ -188,8 +202,10 @@ Continuous integration (`.github/workflows/ci.yml`):
 
 ## Functional cases mapped to automation
 
-- Authentication/session flows: `automation-framework/apps/order_processing/tests/ui/test_login.py` and `automation-framework/apps/order_processing/tests/api/test_auth_session.py`
-- Orders happy-path UI/API coverage: `automation-framework/apps/order_processing/tests/ui/test_orders_smoke.py` and `automation-framework/apps/order_processing/tests/api/test_orders_api.py`
-- End-to-end/system confidence: `automation-framework/tests/integration/test_workflow_e2e.py` and `automation-framework/tests/integration/test_api_db_flow.py`
-- Production sanity/guardrails: `automation-framework/tests/production/test_release_health.py` and `automation-framework/tests/production/test_observability_sanity.py`
-- Dashboard triage anchor (intentional red test): `automation-framework/apps/order_processing/tests/ui/test_demo_intentional_fail.py`
+- Authentication / session: `automation-framework/apps/order_processing/tests/ui/test_login.py` and `automation-framework/apps/order_processing/tests/api/test_auth_session.py`
+- Orders happy-path UI / API coverage: `automation-framework/apps/order_processing/tests/ui/test_orders_smoke.py` and `automation-framework/apps/order_processing/tests/api/test_orders_api.py`
+- Cross-layer stack health: `automation-framework/tests/functional/test_stack_health_functional.py`
+- LLM eval smoke (gated by `RUN_LLM_EVAL=1`): `automation-framework/apps/order_processing/tests/llm/test_summary_eval.py`
+- Backend service contracts + encoded defects: `app/backend/tests/test_health_and_auth.py`, `app/backend/tests/test_known_defects.py` (5 `xfail(strict=True)`)
+- Frontend regression guard: `app/frontend/src/components/Pagination.test.tsx` (1 `it.fails`)
+- Dashboard triage anchor (deliberate red test, excluded from CI): `automation-framework/apps/order_processing/tests/ui/test_demo_intentional_fail.py`
